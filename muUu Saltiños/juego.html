@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Juego de la Vaca Retro</title>
+  <style>
+    body {
+      margin: 0;
+      background: white; /* fondo verde */
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #logo {
+      margin: 10px 0;
+      height: 60px; /* ajusta el tamaño si quieres */
+    }
+    canvas {
+      display: block;
+      background: #000;
+    }
+  </style>
+  <!-- Fuente retro pixel art -->
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Logo fijo arriba -->
+  <img id="logo" src="logo.png" alt="Logo del juego">
+
+  <canvas id="gameCanvas" width="800" height="400"></canvas>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+
+    /* --- Assets --- */
+    const bgImg = new Image(); bgImg.src = 'fondo.jpg';
+    const cowWalk1 = new Image(); cowWalk1.src = 'vaca_caminar1.png';
+    const cowWalk2 = new Image(); cowWalk2.src = 'vaca_caminar2.png';
+    const cowJump  = new Image(); cowJump.src  = 'vaca_saltar.png';
+    const stoneImg = new Image(); stoneImg.src = 'piedra.png';
+    const wolfImg  = new Image(); wolfImg.src  = 'lobo.png';
+    const starImg  = new Image(); starImg.src  = 'estrella.png';
+    const hayImg   = new Image(); hayImg.src   = 'paca.png';
+
+    /* --- Estado --- */
+    let state = 'start';
+    let paused = false;
+
+    const GROUND = 30;
+    const GRAVITY = 0.6;
+    const JUMP = 16; // salto más alto
+
+    /* --- Vaca --- */
+    const cow = { x: 80, y: 0, vy: 0, jumps: 0, invincible: 0 };
+    cow.w = 90; cow.h = 90; // vaca fija 90x90
+
+    function floorY(){ return canvas.height - GROUND - cow.h; }
+
+    function currentCowImage() {
+      if (cow.y < floorY()) return cowJump;
+      return (Math.floor(frame / 15) % 2 === 0) ? cowWalk1 : cowWalk2;
+    }
+
+    function drawCow(){
+      if (cow.invincible > 0 && Math.floor(frame/5)%2===0) return; // parpadeo
+      const img = currentCowImage();
+      ctx.drawImage(img, cow.x, cow.y, cow.w, cow.h);
+    }
+
+    /* --- Obstáculos, estrellas y pacas --- */
+    let obstacles = [];
+    let stars = [];
+    let hays = [];
+
+    const obstacleSpeed = 6;
+    const obstacleGap = [100, 200];
+    let nextObstacle = 0;
+    let nextStar = 0;
+    let nextHay = 0;
+
+    function updateObstacles(){
+      if (frame >= nextObstacle) {
+        const type = Math.random() < 0.75 ? 'stone' : 'wolf';
+        let w, h;
+        if (type === 'stone') {
+          w = 40; h = 40;
+        } else {
+          w = 70; h = 70; // lobo 70x70
+        }
+        obstacles.push({
+          x: canvas.width,
+          y: canvas.height - GROUND - h,
+          w, h, img: type === 'stone' ? stoneImg : wolfImg, type
+        });
+        const gap = Math.floor(Math.random()*(obstacleGap[1]-obstacleGap[0]) + obstacleGap[0]);
+        nextObstacle = frame + gap;
+      }
+      obstacles.forEach(o => o.x -= obstacleSpeed);
+      obstacles = obstacles.filter(o => o.x + o.w > 0);
+    }
+
+    function updateStars(){
+      if (frame >= nextStar) {
+        stars.push({
+          x: canvas.width,
+          y: Math.random()*(canvas.height-120),
+          w: 32, h: 32, img: starImg
+        });
+        nextStar = frame + 600 + Math.random()*400; // mucho más raras
+      }
+      stars.forEach(s => s.x -= obstacleSpeed);
+      stars = stars.filter(s => s.x + s.w > 0);
+    }
+
+    function updateHays(){
+      if (frame >= nextHay) {
+        hays.push({
+          x: canvas.width,
+          y: canvas.height - GROUND - 40,
+          w: 40, h: 40, img: hayImg
+        });
+        nextHay = frame + 200 + Math.random()*200;
+      }
+      hays.forEach(h => h.x -= obstacleSpeed);
+      hays = hays.filter(h => h.x + h.w > 0);
+    }
+
+    /* --- Colisiones --- */
+    function collideRect(a,b){
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + a.h && a.y + cow.h > b.y;
+    }
+
+    /* --- Score --- */
+    let score = 0;
+    let level = 1;
+    let record = 0;
+
+    function drawUI(){
+      ctx.font = "16px 'Press Start 2P'";
+      ctx.textAlign = "left";
+
+      ctx.fillStyle = "black";
+      ctx.fillText("SCORE: " + score, 21, 41);
+      ctx.fillText("LEVEL: " + level, 21, 71);
+      ctx.fillText("RECORD: " + record, 21, 101);
+
+      ctx.fillStyle = "lime";
+      ctx.fillText("SCORE: " + score, 20, 40);
+      ctx.fillText("LEVEL: " + level, 20, 70);
+      ctx.fillText("RECORD: " + record, 20, 100);
+    }
+
+    /* --- Loop principal --- */
+    let frame = 0;
+    function loop(){
+      frame++;
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      if (bgImg.complete) ctx.drawImage(bgImg,0,0,canvas.width,canvas.height);
+
+      if (state === 'play'){
+        // lógica vaca
+        cow.y += cow.vy;
+        cow.vy += GRAVITY;
+        if (cow.y > floorY()) { cow.y = floorY(); cow.vy = 0; cow.jumps = 0; }
+        if (cow.invincible > 0) cow.invincible--;
+
+        // actualizar objetos
+        updateObstacles();
+        updateStars();
+        updateHays();
+
+        // dibujar objetos
+        obstacles.forEach(o => ctx.drawImage(o.img,o.x,o.y,o.w,o.h));
+        stars.forEach(s => ctx.drawImage(s.img,s.x,s.y,s.w,s.h));
+        hays.forEach(h => ctx.drawImage(h.img,h.x,h.y,h.w,h.h));
+
+        // colisiones
+        for (const o of obstacles){
+          if (collideRect({x:cow.x,y:cow.y,w:cow.w,h:cow.h}, o)){
+            if (cow.invincible <= 0){
+              state = 'gameover';
+              if (score > record) record = score;
+            }
+          }
+        }
+        for (const s of stars){
+          if (collideRect({x:cow.x,y:cow.y,w:cow.w,h:cow.h}, s)){
+            cow.invincible = 200;
+            stars = stars.filter(x=>x!==s);
+          }
+        }
+        for (const h of hays){
+          if (collideRect({x:cow.x,y:cow.y,w:cow.w,h:cow.h}, h)){
+            score += 10;
+            hays = hays.filter(x=>x!==h);
+          }
+        }
+
+        // dibujar vaca y UI
+        drawCow();
+        drawUI();
+      }
+      else if (state === 'start'){
+        ctx.fillStyle="white";
+        ctx.font="20px 'Press Start 2P'";
+        ctx.fillText("PULSA ESPACIO PARA EMPEZAR", 80, 200);
+      }
+      else if (state === 'gameover'){
+        // rectángulo verde detrás del texto
+        ctx.fillStyle = "green";
+        ctx.fillRect(200,140,400,180);
+
+        ctx.fillStyle="red";
+        ctx.font="20px 'Press Start 2P'";
+        ctx.fillText("GAME OVER", 280, 180);
+
+        ctx.fillStyle="white";
+        ctx.fillText("SCORE: " + score, 280, 220);
+        ctx.fillText("RECORD: " + record, 280, 260);
+        ctx.fillText("PULSA ESPACIO", 250, 300);
+      }
+
+      requestAnimationFrame(loop);
+    }
+    loop();
+
+    /* --- Controles --- */
+    document.addEventListener('keydown', e => {
+      if (e.code === 'Space'){
+        if (state === 'start'){ 
+          state = 'play'; score=0; obstacles=[]; stars=[]; hays=[];
+          cow.y = floorY(); cow.vy = 0; cow.invincible = 0;
+        }
+        else if (state === 'play'){
+          if (cow.jumps < 2){
+            cow.vy = -JUMP;
+            cow.jumps++;
+          }
+        }
+        else if (state === 'gameover'){
+          state = 'start';
+        }
+      }
+    });
+  </script>
+</body>
+</html>
